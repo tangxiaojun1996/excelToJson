@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <script src="http://oss.sheetjs.com/js-xlsx/xlsx.full.min.js"></script>
+	<script src="./jQuery2.0.0.js"></script>
+	<style type="text/css">
+		div,p{
+			margin: 30px 0;
+		}
+	</style
+</head>
+
+<body>
+<input type="file"onchange="importExcel(this)" />
+<div id="demo"></div>
+<p id="laravelMigrations"></p>
+<script>
+    /*
+    FileReader共有4种读取方法：
+    1.readAsArrayBuffer(file)：将文件读取为ArrayBuffer。
+    2.readAsBinaryString(file)：将文件读取为二进制字符串
+    3.readAsDataURL(file)：将文件读取为Data URL
+    4.readAsText(file, [encoding])：将文件读取为文本，encoding缺省值为'UTF-8'
+                 */
+    var wb;//读取完成的数据
+    var rABS = false; //是否将文件读取为二进制字符串
+
+    function importExcel(obj) {//导入
+        if(!obj.files) {
+            return;
+        }
+        const IMPORTFILE_MAXSIZE = 1*1024;//这里可以自定义控制导入文件大小
+        var suffix = obj.files[0].name.split(".")[1]
+        if(suffix != 'xls' && suffix !='xlsx'){
+            alert('导入的文件格式不正确!')
+            return
+        }
+        if(obj.files[0].size/1024 > IMPORTFILE_MAXSIZE){
+            alert('导入的表格文件不能大于1M')
+            return
+        }
+        var f = obj.files[0];
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var data = e.target.result;
+            if(rABS) {
+                wb = XLSX.read(btoa(fixdata(data)), {//手动转化
+                    type: 'base64'
+                });
+            } else {
+                wb = XLSX.read(data, {
+                    type: 'binary'
+                });
+            }
+            //wb.SheetNames[0]是获取Sheets中第一个Sheet的名字
+            //wb.Sheets[Sheet名]获取第一个Sheet的数据
+			var result = JSON.stringify( XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) );
+            document.getElementById("demo").innerHTML= result;
+			// laravelMigrations
+			var laravelMigrations = changeExcelDataToLaravelMigrations(result);
+			document.getElementById("laravelMigrations").innerHTML= laravelMigrations;
+			
+        };
+        if(rABS) {
+            reader.readAsArrayBuffer(f);
+        } else {
+            reader.readAsBinaryString(f);
+        }
+    }
+
+    function fixdata(data) { //文件流转BinaryString
+        var o = "",
+            l = 0,
+            w = 10240;
+        for(; l < data.byteLength / w; ++l) o += String.fromCharCode.apply(null, new Uint8Array(data.slice(l * w, l * w + w)));
+        o += String.fromCharCode.apply(null, new Uint8Array(data.slice(l * w)));
+        return o;
+    }
+	
+	
+	function changeExcelDataToLaravelMigrations(a){
+		try{
+			a = JSON.parse(a);
+		}catch{
+			console.error("数据格式有误")
+		}
+		var result = '';
+		for (var i = 0,len = a.length;i < len;i ++){
+		var item = a[i];
+		// 遍历每一个对象，删除字段前后的空格
+		for (var key in item){
+			item[key] = $.trim(item[key]);
+		}
+				// 如果有nullable字段，即这一行是一个table的分界线
+				if (!item.nullable) {
+					result += '});\n' +
+						'\n' +
+						'   // ' + item.type + '\n' + "Schema::create('" + item.column + "', function (Blueprint $table) { \n";
+				}
+				else {
+					result = result + '    $table'
+						+ ((item.type === 'char') ? ((item.length == "36") ? ("->uuid('" + item.column +"')") : ("->string('" + item.column +"')"))
+							: (item.type === 'varchar') ? ("->string('" + item.column +"')")
+								: (item.type === 'int') ? ("->integer('" + item.column +"')")
+									: (item.type === 'text') ? ("->text('" + item.column +"')")
+										: ("->string('" + item.column +"')"))
+
+						+ ((item.indexes === 'primary') ? '->primary()'
+							: (item.indexes === 'index') ? '->index()'
+								: '')
+						+ (item.default ? ("->default('" + item.default +  "')") : '')
+					+ ((item.nullable === 'Y') ? '->nullable()' : '')
+					+ (item.remark ? ("->comment('" + item.remark + "')") : '')
+					+ (';\n')
+				  }
+			}
+			// 整理
+		result = result.substring(3,result.length) + '});';
+		console.log(result);
+		return result;
+	}
+
+</script>
+</body>
+
+</html>
